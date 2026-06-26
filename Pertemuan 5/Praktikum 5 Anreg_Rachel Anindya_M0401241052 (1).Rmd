@@ -1,0 +1,261 @@
+---
+title: "Praktikum 5 Anreg"
+author: "Rachel Anindya Aulia Safitri"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown
+---
+
+# Library
+
+```{r}
+library(readxl) # untuk membaca data
+library(GGally) # untuk menghasilkan matriks hubungan antarpeubah
+library(corrplot) # untuk menghasilkan matriks korelasi
+library(dplyr) # untuk manipulasi data
+library(car) # untuk memeriksa multikolinearitas
+```
+
+# Data
+
+```{r}
+data <- read_excel("C:\\Users\\Lenovo\\Downloads\\DataSet Anreg_Rachel Anindya_M0401241052 (1).xlsx")
+head(data) # menampilkan sekian data awal
+str(data) # menampilkan tipe data setiap peubah
+summary(data) # menampilkan ringkasan data
+```
+
+Data yang digunakan adalah data dari 38 provinsi di Indonesia pada tahun 2024 dengan 1 peubah respon yaitu Persentase Penduduk Miskin (PPM) dan 6 peubah penjelas yang seluruhnya berupa peubah kuantitatif. Peubah penjelas tersebut terdiri dari Tingkat Pengangguran Terbuka (TPT), Indeks Pembangunan Manusia (IPM), Rata-rata Lama Sekolah (RLS), Gini Ratio, Produk Domestik Regional Bruto per Kapita (PDRB per Kapita), dan Rata-rata Pengeluaran per Kapita.
+
+Untuk mempermudah proses komputasi, peubah provinsi tidak digunakan dalam pemodelan karena hanya berfungsi sebagai identitas objek pengamatan. Oleh karena itu, pada praktikum ini hanya digunakan satu data pemodelan, yaitu data yang memuat satu peubah respon dan enam peubah penjelas kuantitatif. Data tersebut kemudian dianalisis menggunakan regresi untuk mengetahui hubungan antara faktor-faktor sosial ekonomi dengan Persentase Penduduk Miskin (PPM) pada 38 provinsi di Indonesia tahun 2024.
+
+```{r}
+dt <- select(data, -No, -Provinsi)
+```
+
+# Eksplorasi data
+
+```{r}
+hist(dt$PPM, main = "Sebaran Persentase Penduduk Miskin")
+```
+
+```{r}
+boxplot(dt$PPM, main = "Sebaran Persentase Penduduk Miskin")
+```
+
+```{r}
+ggpairs(dt,
+        upper = list(continuous = wrap('cor', size = 3)),
+        title = "Matriks Scatterplot Data")
+
+```
+
+```{r}
+cor_matrix <- cor(dt, use = "complete.obs")
+
+corrplot(cor_matrix, method = "color", type = "lower",
+         col = colorRampPalette(c("red", "white", "blue"))(200),
+         addCoef.col = "black", tl.col = "black", tl.srt = 35)
+```
+
+Hasil matriks scatter plot dan korelasi menunjukkan bahwa peubah respon PPM memiliki hubungan positif dengan Gini Ratio, serta hubungan negatif dengan TPT, IPM, RLS, PDRBKapita, dan RPK. Beberapa peubah yang memiliki korelasi signifikan dengan PPM adalah TPT, IPM, dan RLS.
+
+Selain itu, terdapat beberapa korelasi cukup tinggi antar peubah penjelas. Beberapa di antaranya adalah:
+1. IPM dan RLS memiliki korelasi sebesar 0.81.
+2. PDRBKapita dan RPK memiliki korelasi sebesar 0.74.
+3. TPT dengan RLS memiliki korelasi sebesar 0.62.
+4. TPT dengan IPM memiliki korelasi sebesar 0.45.
+
+Korelasi yang cukup tinggi ini mengindikasikan adanya potensi multikolinearitas, sehingga dapat memengaruhi keakuratan model regresi yang akan dibentuk.
+
+# Pemodelan
+
+## Tanpa Fungsi
+
+Perhitungan nilai $\hat{\beta}$ secara matriks dapat dilakukan dengan rumus berikut.
+
+$$\hat{\beta} = (X'X)^{-1} X'y$$
+
+```{r}
+# pembentukan matriks
+n <- nrow(dt)
+x0 <- rep(1, n)
+
+x <- data.frame(
+  x0 = x0,
+  TPT = dt$TPT,
+  IPM = dt$IPM,
+  RLS = dt$RLS,
+  GiniRatio = dt[["Gini Ratio"]],
+  PDRBKapita = dt$PDRBKapita,
+  RPK = dt$RPK
+)
+
+x <- as.matrix(x)
+y <- dt$PPM
+```
+
+```{r}
+beta_duga <- solve(t(x)%*%x)%*%t(x)%*%y
+beta_duga
+```
+
+Hasil tersebut menjelaskan bahwa persamaan yang terbentuk adalah
+$$\hat{PPM}=75.63490-0.34375TPT-1.34174IPM+1.94749RLS+48.65193GiniRatio+0.000002779PDRBKapita-0.000000819RPK$$
+Selang kepercayaan dan pengujian signifikansi setiap parameter dapat dilakukan dengan menghitung keragaman tiap dugaan parameter. Secara umum, nilai ragam dugaan parameter $\hat{\beta}_j$ dapat dihitung melalui rumus berikut.
+
+$$Var(\hat{\beta}_j) = \hat{\sigma}^2 C_{jj}$$
+Dengan matriks $C$ adalah matriks $(X'X)^{-1}$ 
+
+```{r}
+c <- data.frame(solve(t(x)%*%x))
+```
+
+Unsur diagonal dari matriks $C$ dapat digunakan untuk menghitung nilai galat baku dari setiap dugaan parameter. Galat baku ini dapat digunakan untuk menghitung selang kepercayaan dari dugaan yang dihasilkan.
+
+$$SE(\hat{\beta}_j) = \sqrt{Var(\hat{\beta}_j)} = \sqrt{\sigma^2 C_{jj}} = \hat{\sigma}\sqrt{c_{ii}}$$
+
+Misal ingin dihitung selang kepercayaan dari dugaan parameter $\beta_2$, maka
+
+```{r}
+y_hat <- x %*% beta_duga
+residuals <- y - y_hat
+n <- nrow(x)
+p <- ncol(x)
+KTG <- sum(residuals^2) / (n - p) 
+
+c22 <- c[2,2]
+
+(se.b2 <- sqrt(KTG*c22))
+```
+
+```{r}
+alfa <- 0.05
+
+#Batas Bawah beta2
+(bb.b2 <- beta_duga[3,1] - abs(qt(alfa/2, df=n-p))*se.b2)
+```
+
+```{r}
+#Batas Atas beta2
+(ba.b2 <- beta_duga[3,1] + abs(qt(alfa/2, df=n-p))*se.b2)
+```
+
+Dengan demikian, kita dapat ketahui selang kepercayaan untuk $\hat{\beta}_2$ sebagai berikut.
+$$-2.291645<\hat{\beta}_2<-0.3918352$$
+Pada kasus selang kepercayaan $\hat{\beta}_2$ di atas, didapati bahwa dugaan parameter berada dalam rentang yang tidak mengandung nilai 0. Dengan demikian, dapat dimaknai bahwa peubah IPM signifikan terhadap PPM pada taraf nyata 5%.
+
+# Dengan Fungsi
+
+```{r}
+model1 <- lm(formula = PPM ~ ., data = dt)
+summary(model1)
+```
+Dugaan parameter model secara matriks dan fungsi menghasilkan angka yang sama, sehingga perhitungan matriks memang sudah tepat. Pada ringkasan model ini dapat dilihat bahwa peubah yang signifikan secara parsial pada taraf nyata 5% adalah IPM, RLS, dan Gini Ratio. Sementara itu, TPT, PDRBKapita, dan RPK tidak signifikan secara parsial terhadap PPM.
+
+Secara simultan, model ini signifikan karena nilai p-value sebesar 6.802e-10 lebih kecil dari alpha 0.05. Selain itu, nilai R-squared sebesar 0.8093 menunjukkan bahwa model mampu menjelaskan keragaman PPM sebesar 80.93%. Namun, adanya perubahan tanda korelasi pada peubah RLS mengindikasikan kemungkinan terdapat multikolinearitas antar peubah penjelas.
+
+# Pemeriksaan Multikoliniearitas
+
+```{r}
+vif(model1)
+```
+
+Hasil uji VIF menunjukkan bahwa seluruh peubah memiliki nilai VIF kurang dari 5. Nilai VIF terbesar terdapat pada peubah RLS sebesar 3.955611, diikuti oleh IPM sebesar 3.067177, RPK sebesar 2.563949, dan PDRBKapita sebesar 2.480097. Sementara itu, TPT dan Gini Ratio memiliki nilai VIF yang relatif rendah.
+
+Berdasarkan hasil tersebut, dapat disimpulkan bahwa tidak terdapat masalah multikolinearitas yang serius pada model, sehingga seluruh peubah masih dapat digunakan dalam pemodelan regresi.
+
+# Pemodelan Dummy
+Pada data yang digunakan, tidak terdapat peubah kualitatif yang digunakan sebagai peubah penjelas dalam model. Peubah Provinsi hanya berfungsi sebagai identitas objek pengamatan, sehingga tidak dimasukkan ke dalam pemodelan regresi. Oleh karena itu, pemodelan dummy tidak dilakukan pada analisis ini.
+
+
+# Uji Hipotesis Kesamaan Parameter Regresi
+
+Misal ingin dilakukan pemodelan dengan peubah respon Persentase Penduduk Miskin dengan 4 peubah penjelas, yaitu IPM, RLS, Gini Ratio, dan TPT.
+
+```{r}
+model4 <- lm(PPM ~ IPM + RLS + `Gini Ratio` + TPT, data = dt)
+summary(model4)
+```
+
+```{r}
+vif(model4)
+```
+
+Regresi yang dihasilkan tidak mengalami masalah multikolinearitas karena seluruh nilai VIF kurang dari 5. Hasil tersebut menunjukkan bahwa peubah IPM, RLS, dan Gini Ratio signifikan pada taraf nyata 5%, sedangkan TPT tidak signifikan. Berikut adalah persamaan yang terbentuk:
+
+$$\hat{PPM}=75.3799-1.3511IPM+1.9922RLS+47.6826GiniRatio-0.3798TPT$$
+
+Hasil pemodelan tersebut dapat dilakukan serangkaian uji untuk memeriksa apakah $\beta_3$ dan $\beta_4$ dapat diasumsikan sama. Pada model ini, $\beta_3$ merupakan koefisien dari peubah Gini Ratio, sedangkan $\beta_4$ merupakan koefisien dari peubah TPT.
+
+Hipotesis yang diuji adalah
+
+$$H_0: \beta_3=\beta_4$$
+
+$$H_1: \beta_3\neq\beta_4$$
+
+Karena peubah TPT tidak signifikan pada taraf nyata 5%, maka koefisien $\beta_4$ dapat diasumsikan nol sehingga model dapat disederhanakan menjadi:
+
+$$PPM=\beta_0+\beta_1IPM+\beta_2RLS+\beta_3GiniRatio+\varepsilon$$
+Jika $H_0$ benar $(\beta_3=\beta_4=\beta')$, maka model dapat ditulis ulang sebagai
+
+$$PPM=\beta_0+\beta_1IPM+\beta_2RLS+\beta'(GiniRatio+TPT)+\varepsilon$$
+
+```{r}
+# Buat peubah baru
+dt$X_new <- dt$`Gini Ratio` + dt$TPT
+
+# Model penuh (Full Model)
+model_full <- lm(PPM ~ IPM + RLS + `Gini Ratio` + TPT, data = dt)
+
+# Model terbatas (Restricted Model)
+model_restricted <- lm(PPM ~ IPM + RLS + X_new, data = dt)
+
+# Bandingkan dengan Uji F
+anova(model_restricted, model_full)
+```
+
+Hasil perbandingan menunjukkan bahwa nilai p-value sebesar 4.416e-05 lebih kecil dari alpha 0.05, sehingga dapat disimpulkan bahwa H0 ditolak. Artinya, koefisien Gini Ratio dan TPT berbeda secara signifikan, sehingga kedua peubah tersebut tidak dapat digabung.
+
+Dengan demikian, model penuh lebih tepat digunakan dibandingkan model terbatas. Model yang digunakan tetap melibatkan peubah IPM, RLS, Gini Ratio, dan TPT sebagai peubah penjelas.
+
+```{r}
+model_all <- lm(PPM ~ IPM + RLS + `Gini Ratio` + TPT, data = dt)
+summary(model_all)
+```
+
+```{r}
+model_signif <- lm(PPM ~ IPM + RLS + `Gini Ratio`, data = dt)
+summary(model_signif)
+```
+
+```{r}
+perbandingan <- data.frame(
+  Model = c("Peubah Penuh", "Peubah Signifikan"),
+  Adjusted_R2 = c(
+    summary(model_all)$adj.r.squared,
+    summary(model_signif)$adj.r.squared
+  ),
+  AIC = c(
+    AIC(model_all),
+    AIC(model_signif)
+  ),
+  BIC = c(
+    BIC(model_all),
+    BIC(model_signif)
+  )
+)
+perbandingan
+```
+
+Berdasarkan indikator Adjusted R square, model dengan peubah signifikan memiliki nilai yang lebih besar, yaitu 0.7870366 dibandingkan model peubah penuh sebesar 0.7854351. Dengan demikian, model dengan peubah signifikan dapat dipilih sebagai model terbaik. Model tersebut menggunakan peubah IPM, RLS, dan Gini Ratio sebagai peubah penjelas.
+
+```{r}
+coef(model_signif)
+```
+$$\hat{PPM}=75.857034-1.335920IPM+1.647461RLS+47.570460GiniRatio$$
+Interpretasi:
+1. Dugaan rataan persentase penduduk miskin jika IPM, RLS, dan Gini Ratio bernilai 0 adalah 75.857034%.
+2. Dugaan rataan persentase penduduk miskin akan menurun sebesar 1.335920 apabila IPM meningkat satu satuan dengan asumsi RLS dan Gini Ratio konstan.
+3. Dugaan rataan persentase penduduk miskin akan meningkat sebesar 1.647461 apabila RLS meningkat satu satuan dengan asumsi IPM dan Gini Ratio konstan.
+4. Dugaan rataan persentase penduduk miskin akan meningkat sebesar 47.570460 apabila Gini Ratio meningkat satu satuan dengan asumsi IPM dan RLS konstan.
